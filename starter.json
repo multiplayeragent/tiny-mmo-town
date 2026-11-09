@@ -1,0 +1,23 @@
+{
+  "name": "Tiny MMO Town",
+  "genre": "rpg",
+  "dim": "2D",
+  "mode": "Drop-in",
+  "players": "2–30",
+  "hook": "A small town that remembers you.",
+  "how": "Walk around town, chat, help the villagers with three little quests and race other players to the shiny coins. Spend coins on hats and shirts at the tailor. Your coins, outfit and quests are saved, and you can save your character to play on any device.",
+  "controls": "Click or tap to walk (or WASD), tap someone to talk, type to chat",
+  "uses": [
+    ["Saves", "Your coins, outfit, quests and spot in town are saved for next time."],
+    ["Player logins", "Anonymous at first; save your character with a username and password and log in on another device."],
+    ["Leaderboard", "The most coins earned."],
+    ["Bots", "Villagers walk about, chat and grab coins until people arrive."],
+    ["Host-run rules", "The host's browser drops the coins and decides who got each one; if it leaves, the next player takes over."],
+    ["Live ops", "Change how much a coin is worth or show an event without touching the code."]
+  ],
+  "ideas": [
+    "Add fishing at the pond",
+    "Add a market where players trade",
+    "Add a weekend event with a reward"
+  ]
+}

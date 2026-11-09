@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tiny MMO Town</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #7cc35a; }
+  body { font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #1d2433; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw; height: 100vh; height: 100dvh; touch-action: none; cursor: pointer; }
+  .hud { position: fixed; pointer-events: none; color: #fff; text-shadow: 0 1px 3px #000c; }
+  #left { top: max(10px, env(safe-area-inset-top)); left: 12px; width: min(340px, 64vw); }
+  #coins { font-size: 22px; font-weight: 800; }
+  #quests { font-size: 13px; font-weight: 700; margin-top: 2px; }
+  #log { font-size: 13px; margin-top: 6px; } #log div { margin-top: 2px; } #log b { font-weight: 800; }
+  #net { top: max(10px, env(safe-area-inset-top)); right: 12px; font-size: 12px; font-weight: 600; text-align: right; max-width: 34vw; }
+  #event { top: calc(max(10px, env(safe-area-inset-top)) + 34px); right: 12px; font-size: 13px; font-weight: 800; color: #ffd23f; text-align: right; max-width: 34vw; }
+  #toast { top: 22%; left: 0; right: 0; text-align: center; font-size: 22px; font-weight: 800; transition: opacity .4s; opacity: 0; }
+  #hint { left: 0; right: 0; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 62px); text-align: center; font-size: 14px; font-weight: 700; padding: 0 12px; }
+  #bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; gap: 8px; width: min(560px, calc(100vw - 24px)); }
+  button { min-width: 48px; min-height: 48px; border: 0; border-radius: 14px; background: #fffffff0; color: #1d2433; font: 700 16px system-ui, sans-serif; box-shadow: 0 2px 6px #0003; cursor: pointer; touch-action: manipulation; }
+  #say { flex: 1; min-width: 0; height: 48px; border: 0; border-radius: 14px; padding: 0 14px; font: 500 16px system-ui, sans-serif; background: #fffffff0; box-shadow: 0 2px 6px #0003; outline: none; }
+  #talk { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(max(12px, env(safe-area-inset-bottom)) + 62px); width: min(460px, calc(100vw - 24px)); box-sizing: border-box; padding: 14px 16px; border-radius: 16px; background: #fffdf5; box-shadow: 0 6px 20px #0004; }
+  #talk h3 { margin: 0 0 4px; font-size: 15px; color: #b5651d; } #talk p { margin: 0 0 10px; font-size: 15px; }
+  #talk div { display: flex; gap: 8px; justify-content: flex-end; } #talk button { padding: 0 16px; box-shadow: none; background: #f0ebe0; }
+  #talk button.yes { background: #ff9f43; color: #fff; }
+  .panel { position: fixed; inset: 0; display: grid; place-items: center; background: #0005; }
+  .card { width: min(400px, calc(100vw - 32px)); max-height: 84vh; overflow: auto; box-sizing: border-box; padding: 18px; border-radius: 18px; background: #fffdf5; box-shadow: 0 10px 30px #0004; }
+  .card h2 { margin: 0 0 8px; font-size: 21px; } .card h3 { margin: 14px 0 6px; font-size: 14px; color: #b5651d; }
+  .card p { margin: 6px 0; font-size: 14px; color: #4a5266; }
+  .card input { width: 100%; box-sizing: border-box; height: 44px; margin: 4px 0; border: 2px solid #e6dfcf; border-radius: 12px; padding: 0 12px; font: 600 16px system-ui, sans-serif; background: #fff; }
+  .card .go { width: 100%; margin-top: 12px; background: #ff9f43; color: #fff; box-shadow: none; }
+  .card ol { margin: 0; padding-left: 24px; } .card li span { float: right; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
+  .grid button { box-shadow: none; background: #f0ebe0; font-size: 14px; padding: 6px; } .grid button.on { outline: 3px solid #ff9f43; }
+  .grid button i { display: block; height: 22px; font-style: normal; font-size: 20px; }
+  .err { color: #c0392b !important; font-weight: 700; }
+  [hidden] { display: none !important; }
+</style>
+<script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud" id="left"><div id="coins"></div><div id="quests"></div><div id="log"></div></div>
+<div class="hud" id="net">Connecting…</div>
+<div class="hud" id="event"></div>
+<div class="hud" id="toast"></div>
+<div class="hud" id="hint"></div>
+<div id="talk" hidden><h3 id="talkName"></h3><p id="talkText"></p><div id="talkBtns"></div></div>
+<div id="bar">
+  <input id="say" maxlength="80" placeholder="Say something…" enterkeyhint="send" autocomplete="off">
+  <button id="meBtn" title="You and your saves">🧑</button>
+  <button id="topBtn" title="Richest players">🏆</button>
+</div>
+<div class="panel" id="shop" hidden><div class="card">
+  <h2>Tess's Tailor</h2><p id="shopCoins"></p>
+  <h3>Hats</h3><div class="grid" id="shopHats"></div>
+  <h3>Shirts</h3><div class="grid" id="shopShirts"></div>
+  <button class="go" data-close="shop">Done</button>
+</div></div>
+<div class="panel" id="mePanel" hidden><div class="card">
+  <h2>You</h2>
+  <input id="nameIn" maxlength="16" placeholder="Your name" aria-label="Your name">
+  <p id="acct"></p>
+  <div id="claimBox"><h3>Save your character</h3><p>Pick a username and password to keep your coins, outfit and quests and play on any device.</p>
+    <input id="cUser" placeholder="Username" autocomplete="username"><input id="cPass" type="password" placeholder="Password (8+ characters)" autocomplete="new-password">
+    <button class="go" id="claimGo">Save my character</button></div>
+  <div id="loginBox"><h3>Played on another device?</h3>
+    <input id="lUser" placeholder="Username" autocomplete="username"><input id="lPass" type="password" placeholder="Password" autocomplete="current-password">
+    <button class="go" id="loginGo">Log in</button></div>
+  <p id="acctMsg"></p>
+  <h3>Quests</h3><div id="questList"></div>
+  <button class="go" data-close="mePanel">Close</button>
+</div></div>
+<div class="panel" id="topPanel" hidden><div class="card">
+  <h2>Most coins earned</h2><ol id="board"><li>Loading…</li></ol><p id="myEarned"></p>
+  <button class="go" data-close="topPanel">Close</button>
+</div></div>
+<script>
+/* ═══ TINY MMO TOWN · a Multiplayer Agent starter ══════════════════════════════════════
+ * A small town that remembers you. Drop-in, 2–30 players; villager bots walk about.
+ *
+ * WHERE THINGS ARE (search for the "── " headers):
+ *   CONFIG ........ speeds, coins, the town map, buildings, NPCs, quests, the shop
+ *   CONNECTION .... MP_CONNECT, joining, the offline room, who is host
+ *   MAP ........... reading CONFIG.map, paths, and painting the town once into a picture
+ *   PEOPLE ........ drawing characters, hats, name tags and chat bubbles
+ *   TOWN (HOST) ... shiny coins and the villager bots. Only the host runs these.
+ *   ME ............ walking, talking to NPCs, quests, picking up coins
+ *   SAVES & LOGIN . player.data saves, "Save your character" (claim) and log in
+ *   HUD & PANELS .. coins, quest tracker, chat log, dialog, shop, leaderboard
+ *   INPUT ......... tap/click to walk, keyboard, chat
+ *
+ * HOW THE MULTIPLAYER WORKS (a relay room: no server code):
+ *   - Each player writes its OWN entity: `p` (one packed JSON field: position, facing,
+ *     walking) about 10 times a second while moving, `look` (name, shirt, hat), `say`
+ *     (your last chat line, so people who arrive later see it) and `hb` (heartbeat).
+ *     A chat line is also sent as an event, "chat" {t, k}, so everyone gets it at once.
+ *   - The HOST is the lowest sessionId among live players (heartbeat seen in the last 3s),
+ *     worked out every frame. Only the host writes the shared fields `coins` (the coins
+ *     lying around + who got the last ones) and `bots` (the villagers). A new host adopts
+ *     both from state.
+ *   - Intent to the host: "grab" {k} (I'm standing on coin k). The host checks you are
+ *     next to it, removes it and writes [k, yourId] into coins.got; you add the coin to
+ *     your save when you see your id there.
+ *   - Your character is YOUR save, not room state: player.data (namespace CONFIG.saveNs)
+ *     keeps position, coins, outfit and quests; anonymous by default, claimable with a
+ *     username + password so you can log in on another device. Offline: localStorage.
+ *   - Live ops: mp.live.config.coinValue (coins per pickup) and the active event's title.
+ *   - ?attract plays offline with bots only (the preview video is recorded from it).
+ *   - Leaderboard "coins": the most coins each player has ever earned.
+ */
+
+// ── CONFIG ──────────────────────────────────────────────────────────────────────────
+const CONFIG = {
+  speed: 4.2,            // tiles per second
+  seats: 8,              // villager bots fill the town up to this many walkers
+  coinsOnMap: 6,         // shiny coins the host keeps lying around town
+  coinEvery: 4000,       // ms between new coins
+  coinValue: 1,          // coins per pickup (live ops can change it: coinValue)
+  bubbleMs: 6000,        // ms a chat bubble stays up
+  botTalk: [10000, 22000], // ms between one villager's lines
+  saveNs: "tiny-mmo-town", // player.data namespace for saves
+  saveEveryMs: 10000,
+  board: "coins",
+  botLines: ["Morning, neighbor!", "The bakery smells amazing today", "Has anyone seen Finn's hat?", "I just got a new hat from Tess!",
+    "The pond is so peaceful", "Grab the shiny coins before I do 😄", "The Mayor needs help with letters", "Nice outfit!",
+    "Apples are in season!", "See you around town", "Hello! 👋", "This town is the best"],
+  // The town. . grass  , flowers  : tall grass  = path  ~ water  T tree  o apple tree
+  // # fence  m mailbox  W well  H building (drawn from CONFIG.buildings)
+  map: [
+    "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+    "T....,...............,.................T",
+    "T.##########.T..HHHHHHHH.T............TT",
+    "T.#,......,#.,..HHHHHHHH,.HHHHH.HHHHH..T",
+    "T.#.o..o.o.#,.T.HHHHHHHH..HHHHH.HHHHH..T",
+    "T.#........#....HHHHHHHH..HHHHH.HHHHH..T",
+    "T.#.o..o.o.#.T..HHHHHHHH..HHHHH.HHHHH..T",
+    "T.#........#.....,,==...T..,=.m..,=.m..T",
+    "T.####==####.......==.......=.....=....T",
+    "T======================================T",
+    "TT....,....,...==========...........,..T",
+    "T..HHHHHHH.....==========.....HHHHHHH.,T",
+    "T..HHHHHHH..T..==========.....HHHHHHH.TT",
+    "T..HHHHHHH.....====WW====.T...HHHHHHH..T",
+    "T..HHHHHHH.....====WW====..,..HHHHHHH..T",
+    "T..HHHHHHH...T.==========.....HHHHHHH..T",
+    "T.....=........==========.,T.....=....TT",
+    "T.T...=........==========,.......=.....T",
+    "T======================================T",
+    "T..................==..................T",
+    "TT.......T.T.......==......,..........,T",
+    "T.,HHHHH.......T...==..T....~~~~~~~~.:.T",
+    "T..HHHHH...........==.,...~~~~~~~~~~~~:T",
+    "T..HHHHH.....T.....==..,..~~~~~~~~~~~~:T",
+    "T..HHHHHm..........==.....~~~~~~~~~~~~:T",
+    "TT...=....T.....T..==.T.:...~~~~~~~~.:.T",
+    "T....=...........,.==...::..........::.T",
+    "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
+  ],
+  buildings: [ // x, y, w, h in tiles; door = the door's column
+    { x: 16, y: 2, w: 8, h: 5, door: 19.5, wall: "#f4e4c4", roof: "#c0504d", sign: "TOWN HALL" },
+    { x: 26, y: 3, w: 5, h: 4, door: 28, wall: "#fbe9d0", roof: "#4f86c6" },
+    { x: 32, y: 3, w: 5, h: 4, door: 34, wall: "#e9f2d8", roof: "#7a9a4a" },
+    { x: 3, y: 11, w: 7, h: 5, door: 6, wall: "#fbe3c4", roof: "#d9822b", sign: "BAKERY" },
+    { x: 30, y: 11, w: 7, h: 5, door: 33, wall: "#f6dbe6", roof: "#b04f8a", sign: "TAILOR" },
+    { x: 3, y: 21, w: 5, h: 4, door: 5, wall: "#e4ecf5", roof: "#8a6bbf" },
+  ],
+  npcs: [
+    { id: "mo", name: "Mayor Mo", x: 21.5, y: 7.5, look: { s: "#5b5fc7", h: "tophat" }, quest: "letters", idle: "Tiny Town thanks you!" },
+    { id: "bea", name: "Bea the Baker", x: 7.5, y: 16.5, look: { s: "#f4a261", h: "chef" }, quest: "apples", idle: "Fresh bread every morning!" },
+    { id: "tess", name: "Tess the Tailor", x: 32.5, y: 16.5, look: { s: "#e76f9a", h: "bow" }, shop: true, idle: "Want a new look?" },
+    { id: "finn", name: "Finn", x: 26.5, y: 22.5, look: { s: "#2a9d8f", h: "straw" }, quest: "hat", idle: "The fish are biting today." },
+  ],
+  quests: {
+    apples: { title: "🍎 Bea's apples", need: 5, reward: 10, ask: "My oven is hot but my basket is empty! Could you pick 5 apples in the orchard?", done: "Perfect apples! Here are 10 coins." },
+    hat: { title: "🎩 Finn's lucky hat", need: 1, reward: 15, ask: "The wind took my lucky hat! I think it landed in the tall grass on the far side of the pond.", done: "My lucky hat! You're a star. Take 15 coins." },
+    letters: { title: "✉️ Mayor's letters", need: 3, reward: 25, ask: "These letters need delivering. Pop one in each house's mailbox, please!", done: "Every letter delivered! Here are 25 coins." },
+  },
+  hatSpot: { x: 38.5, y: 23.5 },  // where Finn's hat landed
+  hats: { cap: 8, bow: 12, flower: 15, tophat: 25, wizard: 40, crown: 60 }, // the shop's hats and prices
+  shirtPrice: 5,
+};
+const COLORS = ["#e74c3c", "#3498db", "#f1c40f", "#2ecc71", "#9b59b6", "#ff7f50", "#1abc9c", "#ff6fb5"];
+const BOT_NAMES = ["Pixel", "Mira", "Tobi", "Wren", "Juno", "Basil", "Kiki", "Otto", "Lark", "Fern"];
+const HAT_ICON = { cap: "🧢", bow: "🎀", flower: "🌼", tophat: "🎩", wizard: "🧙", crown: "👑" };
+
+// ── CONNECTION ──────────────────────────────────────────────────────────────────────
+// The builder fills these in for this game. Downloaded from GitHub? Put your own pk_ key here.
+const MP_CONNECT = {
+  key: 'pk_REPLACE_ME',
+  room: 'tiny-mmo-town',
+  endpoint: 'wss://live.multiplayeragent.com',
+  apiUrl: 'https://api.multiplayeragent.com',
+};
+const ATTRACT = new URLSearchParams(location.search).has("attract");
+if (ATTRACT) Object.assign(CONFIG, { seats: 10, coinsOnMap: 10, coinEvery: 900, botTalk: [3000, 7000] });
+
+/** Same shape as the SDK client, kept in this tab: offline play and ?attract. */
+function localRoom() {
+  const id = "local", state = { entities: { players: { [id]: {} } }, shared: {} }, subs = [];
+  let queued = false;
+  const emit = () => { if (!queued) { queued = true; queueMicrotask(() => { queued = false; subs.forEach((f) => f(state)); }); } };
+  const put = (o, k, v) => { if (typeof k === "object") Object.assign(o, k); else o[k] = v; emit(); };
+  return {
+    sessionId: id, state, offline: true, live: { config: {}, active: [] },
+    me: { set: (k, v) => put(state.entities.players[id], k, v) },
+    setShared: (k, v) => put(state.shared, k, v),
+    onState: (f) => { subs.push(f); f(state); }, onJoin() {}, onLeave() {}, on() {}, send() {}, onLive() {},
+    onDisconnect() {}, onReconnect() {}, leave: async () => {},
+  };
+}
+async function connect() {
+  if (ATTRACT || typeof MP === "undefined") return localRoom();
+  try {
+    const mp = await Promise.race([MP.join({ ...MP_CONNECT }), new Promise((_, no) => setTimeout(() => no(new Error("timed out")), 10000))]);
+    window.mp = mp; // the builder calls window.mp.leave() when the page closes
+    return mp;
+  } catch (e) {
+    console.warn("Playing offline:", e && e.message);
+    return localRoom();
+  }
+}
+const parse = (v, fb) => { if (typeof v !== "string") return fb; try { return JSON.parse(v); } catch { return fb; } };
+const cache = new Map();
+/** A JSON field (shared or a player's), parsed once per change. Read-only. */
+function field(key, raw, fb) { const m = cache.get(key); if (m && m.raw === raw) return m.v; const v = parse(raw, fb); cache.set(key, { raw, v }); return v; }
+let net = null, S = { entities: { players: {} }, shared: {} };
+const seenHb = new Map();
+function livePlayers() {
+  const now = performance.now(), out = [];
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    const s = seenHb.get(id);
+    if (!s || s.hb !== p.hb) seenHb.set(id, { hb: p.hb, at: now });
+    if (id === net.sessionId || now - seenHb.get(id).at < 3000) out.push(id);
+  }
+  return out.sort();
+}
+const isHost = () => livePlayers()[0] === net.sessionId;
+
+// ── MAP ─────────────────────────────────────────────────────────────────────────────
+const T = 32, MAP = CONFIG.map, MW = MAP[0].length, MH = MAP.length;
+const at = (x, y) => (MAP[y] && MAP[y][x]) || "T";
+const npcTile = new Set(CONFIG.npcs.map((n) => Math.floor(n.x) + "," + Math.floor(n.y)));
+const solid = (x, y) => "T#~WomH".includes(at(x, y)) || npcTile.has(x + "," + y);
+const free = (x, y) => !solid(Math.floor(x), Math.floor(y));
+const find = (ch) => MAP.flatMap((row, y) => [...row].flatMap((c, x) => (c === ch ? [{ x: x + 0.5, y: y + 0.5 }] : [])));
+const APPLE_TREES = find("o"), MAILBOXES = find("m"), SPAWN = { x: 19.5, y: 11.5 };
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const rnd = (a, b) => a + Math.random() * (b - a), pick = (l) => l[Math.floor(Math.random() * l.length)];
+const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+/** A walkable route from a to b as tile centres (ending at b), or [] if there is none. */
+function route(a, b) {
+  const sx = Math.floor(a.x), sy = Math.floor(a.y), gx = Math.floor(b.x), gy = Math.floor(b.y), goal = gx + gy * MW;
+  if (solid(gx, gy)) return [];
+  const prev = new Int32Array(MW * MH).fill(-1), q = [sx + sy * MW];
+  prev[q[0]] = q[0];
+  for (let h = 0; h < q.length && prev[goal] < 0; h++) {
+    const k = q[h], x = k % MW, y = (k / MW) | 0;
+    for (const [dx, dy] of DIRS) {
+      const nx = x + dx, ny = y + dy, n = nx + ny * MW;
+      if (nx < 0 || ny < 0 || nx >= MW || ny >= MH || solid(nx, ny) || prev[n] >= 0 || (dx && dy && (solid(x + dx, y) || solid(x, y + dy)))) continue;
+      prev[n] = k; q.push(n);
+    }
+  }
+  if (prev[goal] < 0) return [];
+  const out = [{ x: b.x, y: b.y }];
+  for (let k = prev[goal]; k !== prev[k]; k = prev[k]) out.unshift({ x: (k % MW) + 0.5, y: ((k / MW) | 0) + 0.5 });
+  return out;
+}
+/** The nearest free tile centre to (x, y): where a tap on a wall or tree walks you. */
+function nearestFree(x, y) {
+  for (let r = 0; r < 6; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (!solid(Math.floor(x) + dx, Math.floor(y) + dy)) return { x: Math.floor(x) + dx + 0.5, y: Math.floor(y) + dy + 0.5 };
+  return SPAWN;
+}
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+
+/** Paint the whole town once into a picture; every frame just shows the part on screen. */
+function paintTown() {
+  const c = document.createElement("canvas"); c.width = MW * T; c.height = MH * T;
+  const g = c.getContext("2d"), r = mulberry32(5), circle = (x, y, rad, col) => { g.fillStyle = col; g.beginPath(); g.arc(x, y, rad, 0, Math.PI * 2); g.fill(); };
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    const ch = at(x, y), px = x * T, py = y * T;
+    if (ch === "=" || ch === "W") { g.fillStyle = "#e6d1a0"; g.fillRect(px, py, T, T); for (let i = 0; i < 4; i++) { g.fillStyle = r() < 0.5 ? "#d8c08a" : "#efdcb0"; g.fillRect(px + r() * 26, py + r() * 26, 7, 5); } continue; }
+    if (ch === "~") {
+      g.fillStyle = "#4aa8e0"; g.fillRect(px, py, T, T);
+      g.fillStyle = "#cdeaf8"; for (const [dx, dy, w, h] of [[0, -1, T, 4], [0, 1, T, 4], [-1, 0, 4, T], [1, 0, 4, T]]) if (at(x + dx, y + dy) !== "~") g.fillRect(px + (dx > 0 ? T - 4 : 0), py + (dy > 0 ? T - 4 : 0), w, h);
+      continue;
+    }
+    g.fillStyle = (x + y) % 2 ? "#88cb64" : "#8bce66"; g.fillRect(px, py, T, T);
+    for (let i = 0; i < 3; i++) { g.fillStyle = "#74b852"; g.fillRect(px + r() * 28, py + r() * 28, 2, 4); }
+    if (ch === ",") for (let i = 0; i < 3; i++) circle(px + 6 + r() * 20, py + 6 + r() * 20, 3, pick(["#ff6fb5", "#ffd23f", "#fff", "#c77dff"]));
+    if (ch === ":") { g.strokeStyle = "#4e9a3a"; g.lineWidth = 2; for (let i = 0; i < 7; i++) { const sx = px + 3 + r() * 26, sy = py + 12 + r() * 18; g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx + r() * 6 - 3, sy - 12); g.stroke(); } }
+    if (ch === "#") { g.fillStyle = "#b07a4a"; if (at(x - 1, y) === "#" || at(x + 1, y) === "#") { g.fillRect(px, py + 12, T, 4); g.fillRect(px, py + 20, T, 4); } if (at(x, y - 1) === "#" || at(x, y + 1) === "#") g.fillRect(px + 13, py, 6, T); g.fillStyle = "#8a5a34"; g.fillRect(px + 12, py + 8, 8, 20); }
+    if (ch === "m") { g.fillStyle = "#6b4a2a"; g.fillRect(px + 14, py + 14, 4, 16); g.fillStyle = "#d63031"; g.fillRect(px + 8, py + 6, 16, 11); g.fillStyle = "#ffd23f"; g.fillRect(px + 22, py + 3, 3, 8); }
+  }
+  // the well
+  const w = find("W")[0]; circle(w.x * T + 16, w.y * T + 18, 26, "#9aa3ad"); circle(w.x * T + 16, w.y * T + 18, 18, "#2e6fa3");
+  g.fillStyle = "#8a5a34"; g.fillRect(w.x * T - 10, w.y * T - 18, 6, 34); g.fillRect(w.x * T + 36, w.y * T - 18, 6, 34); g.fillStyle = "#c0504d"; g.fillRect(w.x * T - 16, w.y * T - 26, 64, 10);
+  for (const b of CONFIG.buildings) {
+    const px = b.x * T, py = b.y * T, pw = b.w * T, ph = b.h * T, roofH = ph * 0.5;
+    g.fillStyle = "#0002"; g.fillRect(px + 4, py + 8, pw, ph);
+    g.fillStyle = b.wall; g.fillRect(px, py + roofH - 6, pw, ph - roofH + 6);
+    g.fillStyle = b.roof; g.beginPath(); g.moveTo(px - 6, py + roofH); g.lineTo(px + 10, py); g.lineTo(px + pw - 10, py); g.lineTo(px + pw + 6, py + roofH); g.closePath(); g.fill();
+    g.strokeStyle = "#0002"; g.lineWidth = 3; for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(px - 4 + i * 2, py + (roofH * i) / 4); g.lineTo(px + pw + 4 - i * 2, py + (roofH * i) / 4); g.stroke(); }
+    const dx = b.door * T + (Number.isInteger(b.door) ? T / 2 : 0);
+    g.fillStyle = "#7a4a26"; g.fillRect(dx - 11, py + ph - 30, 22, 30); circle(dx + 6, py + ph - 14, 2, "#ffd23f");
+    for (let wx = px + 20; wx < px + pw - 20; wx += 44) if (Math.abs(wx + 9 - dx) > 26) { g.fillStyle = "#fff"; g.fillRect(wx - 2, py + ph - 34, 22, 20); g.fillStyle = "#8fd3ff"; g.fillRect(wx, py + ph - 32, 18, 16); }
+    if (b.sign) { g.font = "bold 13px system-ui"; g.textAlign = "center"; const tw = g.measureText(b.sign).width + 12; g.fillStyle = "#6b4a2a"; g.fillRect(dx - tw / 2, py + roofH - 2, tw, 18); g.fillStyle = "#fff"; g.fillText(b.sign, dx, py + roofH + 11); }
+  }
+  // trees last, top to bottom, so lower trees overlap higher ones
+  for (let y = 0; y < MH; y++) for (let x = 0; x < MW; x++) {
+    const ch = at(x, y); if (ch !== "T" && ch !== "o") continue;
+    const cx = x * T + 16, cy = y * T + 16, s = 0.85 + r() * 0.3;
+    g.fillStyle = "#0003"; g.beginPath(); g.ellipse(cx, cy + 12, 14 * s, 5, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = "#7a4e2a"; g.fillRect(cx - 4, cy - 2, 8, 15);
+    const leaf = ch === "o" ? ["#4caf50", "#66bb6a"] : ["#2e7d32", "#43a047"];
+    circle(cx, cy - 10, 15 * s, leaf[0]); circle(cx - 6 * s, cy - 14, 9 * s, leaf[1]); circle(cx + 7 * s, cy - 8, 8 * s, leaf[1]);
+  }
+  return c;
+}
+
+// ── PEOPLE ──────────────────────────────────────────────────────────────────────────
+const cv = document.getElementById("game"), ctx = cv.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+function fit() { DPR = Math.min(2, devicePixelRatio || 1); W = innerWidth; H = innerHeight; cv.width = W * DPR; cv.height = H * DPR; }
+addEventListener("resize", fit); addEventListener("orientationchange", fit); fit();
+const dot = (x, y, r, col) => { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); };
+/** A villager: feet at (x, y) in town pixels. d: 0 down, 1 left, 2 right, 3 up. */
+function drawPerson(x, y, look, d, phase, walking) {
+  const bob = walking ? Math.abs(Math.sin(phase)) * 2 : 0, leg = walking ? Math.sin(phase) * 3 : 0;
+  ctx.fillStyle = "#0003"; ctx.beginPath(); ctx.ellipse(x, y, 10, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#3b3f58"; ctx.fillRect(x - 6, y - 9 - bob, 5, 8 + leg); ctx.fillRect(x + 1, y - 9 - bob, 5, 8 - leg);
+  ctx.fillStyle = look.s || "#ccc"; ctx.beginPath(); ctx.roundRect(x - 9, y - 23 - bob, 18, 16, 6); ctx.fill();
+  dot(x - 9, y - 16 - bob + leg * 0.5, 3.5, look.s || "#ccc"); dot(x + 9, y - 16 - bob - leg * 0.5, 3.5, look.s || "#ccc");
+  const hy = y - 31 - bob;
+  dot(x, hy, 10, "#ffdcb8");
+  ctx.fillStyle = "#5a3a22"; ctx.beginPath(); ctx.arc(x, hy - 1, 10.5, Math.PI * (d === 3 ? 0 : 1.05), Math.PI * (d === 3 ? 2 : 1.95)); ctx.fill();
+  if (d !== 3) { const ox = d === 1 ? -3 : d === 2 ? 3 : 0; if (d !== 2) dot(x - 3.5 + ox, hy + 1, 1.6, "#222"); if (d !== 1) dot(x + 3.5 + ox, hy + 1, 1.6, "#222"); if (d === 0) { dot(x - 6, hy + 4, 1.8, "#ff9fb0"); dot(x + 6, hy + 4, 1.8, "#ff9fb0"); } }
+  drawHat(look.h, x, hy - 8, d);
+}
+function drawHat(h, x, y, d) {
+  const f = (col) => (ctx.fillStyle = col);
+  if (h === "cap") { f("#e74c3c"); ctx.beginPath(); ctx.arc(x, y + 3, 9, Math.PI, 0); ctx.fill(); ctx.fillRect(d === 1 ? x - 15 : x - 3, y + 1, d === 0 || d === 3 ? 0 : 18, 3); if (d === 0) ctx.fillRect(x - 8, y + 2, 16, 3); }
+  if (h === "bow") { f("#ff6fb5"); ctx.beginPath(); ctx.moveTo(x, y + 2); ctx.lineTo(x - 9, y - 4); ctx.lineTo(x - 9, y + 7); ctx.moveTo(x, y + 2); ctx.lineTo(x + 9, y - 4); ctx.lineTo(x + 9, y + 7); ctx.fill(); dot(x, y + 2, 3, "#d6457f"); }
+  if (h === "flower") { for (let i = 0; i < 5; i++) dot(x + 6 + Math.cos(i * 1.26) * 4, y + 2 + Math.sin(i * 1.26) * 4, 3, "#fff"); dot(x + 6, y + 2, 2.5, "#ffd23f"); }
+  if (h === "tophat") { f("#222"); ctx.fillRect(x - 12, y + 2, 24, 3); ctx.fillRect(x - 7, y - 12, 14, 15); f("#c0392b"); ctx.fillRect(x - 7, y - 1, 14, 3); }
+  if (h === "wizard") { f("#6c4ad6"); ctx.beginPath(); ctx.moveTo(x - 12, y + 4); ctx.lineTo(x + 12, y + 4); ctx.lineTo(x + 3, y - 20); ctx.fill(); dot(x, y - 4, 2.5, "#ffd23f"); }
+  if (h === "crown") { f("#f5c518"); ctx.beginPath(); ctx.moveTo(x - 9, y + 4); ctx.lineTo(x - 9, y - 6); ctx.lineTo(x - 4, y - 1); ctx.lineTo(x, y - 9); ctx.lineTo(x + 4, y - 1); ctx.lineTo(x + 9, y - 6); ctx.lineTo(x + 9, y + 4); ctx.fill(); }
+  if (h === "chef") { dot(x - 5, y - 3, 6, "#fff"); dot(x + 5, y - 3, 6, "#fff"); dot(x, y - 7, 6, "#fff"); f("#fff"); ctx.fillRect(x - 9, y - 2, 18, 6); }
+  if (h === "straw") { f("#e8c170"); ctx.beginPath(); ctx.ellipse(x, y + 4, 15, 4, 0, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.arc(x, y + 3, 8, Math.PI, 0); ctx.fill(); }
+}
+/** Name tags, quest marks and chat bubbles, drawn in screen pixels so they stay readable. */
+function drawLabel(sx, sy, name, color, bubble, mark) {
+  ctx.textAlign = "center";
+  if (name) { ctx.font = "700 12px system-ui, sans-serif"; ctx.lineWidth = 3; ctx.strokeStyle = "#000a"; ctx.strokeText(name, sx, sy); ctx.fillStyle = color || "#fff"; ctx.fillText(name, sx, sy); }
+  if (mark) { ctx.font = "900 22px system-ui, sans-serif"; ctx.lineWidth = 4; ctx.strokeStyle = "#5a3a00"; ctx.strokeText(mark, sx, sy - 16 + Math.sin(performance.now() / 200) * 2); ctx.fillStyle = "#ffd23f"; ctx.fillText(mark, sx, sy - 16 + Math.sin(performance.now() / 200) * 2); }
+  if (!bubble) return;
+  ctx.font = "600 13px system-ui, sans-serif";
+  const words = bubble.split(" "), lines = [""];
+  for (const w of words) { const tryL = lines[lines.length - 1] ? lines[lines.length - 1] + " " + w : w; if (ctx.measureText(tryL).width > 150 && lines[lines.length - 1]) lines.push(w); else lines[lines.length - 1] = tryL; }
+  const bw = Math.min(170, Math.max(...lines.map((l) => ctx.measureText(l).width)) + 16), bh = lines.length * 16 + 10, bx = sx - bw / 2, by = sy - 18 - bh - (mark ? 22 : 0);
+  ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 10); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(sx - 6, by + bh); ctx.lineTo(sx + 6, by + bh); ctx.lineTo(sx, by + bh + 6); ctx.fill();
+  ctx.fillStyle = "#1d2433"; lines.forEach((l, i) => ctx.fillText(l, sx, by + 19 + i * 16));
+}
+
+// ── TOWN (HOST) ─────────────────────────────────────────────────────────────────────
+const SQUARE = { x: 20, y: 10.5 }; // ?attract keeps everyone around the square so the preview is busy
+const POIS = [SPAWN, { x: 7.5, y: 17.5 }, { x: 33.5, y: 17.5 }, { x: 20.5, y: 8.5 }, { x: 25.5, y: 21.5 }, { x: 6.5, y: 9.5 }, { x: 28.5, y: 8.5 }, { x: 34.5, y: 8.5 }, { x: 22.5, y: 15.5 }, { x: 12.5, y: 18.5 }, { x: 5.5, y: 26.5 }, { x: 30.5, y: 26.5 }, { x: 14.5, y: 9.5 }, { x: 25.5, y: 9.5 }].filter((p) => !ATTRACT || dist(p, SQUARE) < 9);
+const host = { was: false, bots: new Map(), coins: { list: [], got: [] }, coinAt: 0, coinsDirty: false, lastPub: 0, greeted: new Set(), queue: [] };
+function botList() {
+  if (isHost()) return [...host.bots.values()].map((b) => ({ i: b.id, n: b.name, s: b.look.s, h: b.look.h, x: b.x, y: b.y, d: b.d, w: b.w, st: b.say.t, sk: b.say.k }));
+  return field("shared:bots", S.shared.bots, []);
+}
+const coins = () => (isHost() ? host.coins : field("shared:coins", S.shared.coins, { list: [], got: [] }));
+function adopt() {
+  host.was = true; host.bots.clear();
+  const c = field("shared:coins", S.shared.coins, null); host.coins = c ? { list: [...c.list], got: [...c.got] } : { list: [], got: [] };
+  for (const b of field("shared:bots", S.shared.bots, [])) host.bots.set(b.i, newBot(b.i, { name: b.n, look: { s: b.s, h: b.h }, x: b.x, y: b.y, d: b.d, say: { t: b.st || "", k: b.sk || 0 } }));
+  for (const id of livePlayers()) if (id !== net.sessionId || S.shared.bots) host.greeted.add(id); // a fresh room greets you
+}
+function newBot(id, from) {
+  const used = new Set([...host.bots.values()].map((b) => b.name)), spot = pick(POIS);
+  return { id, name: BOT_NAMES.find((n) => !used.has(n)) || "Villager", look: { s: pick(COLORS), h: pick(["", "cap", "bow", "flower", "tophat", "wizard"]) },
+    x: spot.x, y: spot.y, d: 0, w: 0, path: [], until: 0, coin: "", phase: 0, nextSay: performance.now() + rnd(2000, CONFIG.botTalk[1]), say: { t: "", k: 0 }, ...from };
+}
+function botLine(b, text) { b.say = { t: text, k: b.say.k + 1 }; bubble(b.id, b.name, b.look.s, text); }
+/** A "grab" intent (or the host's own pickup): remove the coin and record who got it. */
+function applyGrab(id, k) {
+  const c = host.coins, i = c.list.findIndex((q) => q[0] === k), who = id === net.sessionId ? me : everyone().find((p) => p.id === id);
+  if (i < 0 || !who || Math.hypot(who.x - c.list[i][1], who.y - c.list[i][2]) > 2) return;
+  c.list.splice(i, 1); c.got.push([k, id]); if (c.got.length > 12) c.got.shift(); host.coinsDirty = true;
+}
+function hostTick(dt, now) {
+  if (!host.was) adopt();
+  const humans = livePlayers().filter((id) => !(ATTRACT && id === net.sessionId)), want = Math.max(0, CONFIG.seats - humans.length - (ATTRACT ? 1 : 0));
+  while (host.bots.size > want) host.bots.delete([...host.bots.keys()].pop());
+  while (host.bots.size < want) { const id = "b" + Math.random().toString(36).slice(2, 6); host.bots.set(id, newBot(id)); }
+  if (host.coins.list.length < CONFIG.coinsOnMap && now > host.coinAt) { // a new shiny coin somewhere in town
+    host.coinAt = now + CONFIG.coinEvery;
+    for (let tries = 0; tries < (ATTRACT ? 200 : 30); tries++) { const x = 1 + Math.floor(Math.random() * (MW - 2)), y = 1 + Math.floor(Math.random() * (MH - 2)); if (ATTRACT && dist({ x, y }, SQUARE) > 8) continue; if (!solid(x, y) && route(SPAWN, { x: x + 0.5, y: y + 0.5 }).length) { host.coins.list.push([Date.now().toString(36) + Math.random().toString(36).slice(2, 5), x + 0.5, y + 0.5]); host.coinsDirty = true; break; } }
+  }
+  const bots = [...host.bots.values()];
+  for (const id of humans) { // a villager says hi to everyone who arrives
+    const look = id === net.sessionId ? myLook : field("look:" + id, S.entities.players[id]?.look, {});
+    if (look.n && !host.greeted.has(id) && bots.length) { host.greeted.add(id); host.queue.push({ at: now + 1500, id: pick(bots).id, text: `Welcome to town, ${look.n}!` }); }
+  }
+  for (const q of host.queue) if (now >= q.at && host.bots.get(q.id)) botLine(host.bots.get(q.id), q.text);
+  host.queue = host.queue.filter((q) => now < q.at);
+  for (const b of bots) {
+    if (b.path.length) { b.w = 1; b.phase += dt * 12; step(b, CONFIG.speed * 0.6, dt); }
+    else {
+      b.w = 0;
+      if (b.coin) { applyGrab(b.id, b.coin); b.coin = ""; }
+      if (now > b.until) { // next: chase a coin now and then, else stroll to a spot in town
+        const coin = Math.random() < 0.4 && host.coins.list.slice().sort((p, q) => Math.hypot(p[1] - b.x, p[2] - b.y) - Math.hypot(q[1] - b.x, q[2] - b.y))[0];
+        const goal = coin ? { x: coin[1], y: coin[2] } : nearestFree(pick(POIS).x + rnd(-2, 2), pick(POIS).y + rnd(-1, 1));
+        b.coin = coin ? coin[0] : ""; b.path = route(b, goal); b.until = now + rnd(1500, 5000);
+      }
+    }
+    if (now > b.nextSay) { b.nextSay = now + rnd(...CONFIG.botTalk); botLine(b, pick(CONFIG.botLines)); }
+  }
+  if (now - host.lastPub > 160) { // ~6/s, one message for every villager; coins only when they change
+    host.lastPub = now; const r2 = (v) => Math.round(v * 100) / 100;
+    net.setShared("bots", JSON.stringify(botList().map((b) => ({ ...b, x: r2(b.x), y: r2(b.y) }))));
+    if (host.coinsDirty) { host.coinsDirty = false; net.setShared("coins", JSON.stringify(host.coins)); }
+  }
+}
+/** Move a walker along its path; facing follows the step. */
+function step(a, speed, dt) {
+  const p = a.path[0], dx = p.x - a.x, dy = p.y - a.y, d = Math.hypot(dx, dy), s = speed * dt;
+  if (d <= s) { a.x = p.x; a.y = p.y; a.path.shift(); } else { a.x += (dx / d) * s; a.y += (dy / d) * s; }
+  if (d > 0.01) a.d = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? 1 : 2) : dy < 0 ? 3 : 0;
+}
+
+// ── ME ──────────────────────────────────────────────────────────────────────────────
+const me = { x: SPAWN.x, y: SPAWN.y, d: 0, w: 0, phase: 0, path: [], talkTo: null, lastSend: 0, sent: "", sayK: 0, lastSay: 0, pending: new Map(), credited: new Set(), autoAt: 0 };
+let myLook = { n: "", s: COLORS[0], h: "" };
+const keys = new Set();
+function myTick(dt, now) {
+  let mx = 0, my = 0;
+  if (!typing()) { mx = (keys.has("d") || keys.has("arrowright") ? 1 : 0) - (keys.has("a") || keys.has("arrowleft") ? 1 : 0); my = (keys.has("s") || keys.has("arrowdown") ? 1 : 0) - (keys.has("w") || keys.has("arrowup") ? 1 : 0); }
+  if (ATTRACT && now > me.autoAt) { // the preview strolls between coins and spots in town
+    me.autoAt = now + rnd(3000, 6000); const c = coins().list[0];
+    me.path = route(me, c && Math.random() < 0.6 ? { x: c[1], y: c[2] } : nearestFree(pick(POIS).x, pick(POIS).y));
+  }
+  if (mx || my) {
+    me.path = []; me.talkTo = null;
+    const len = Math.hypot(mx, my), s = (CONFIG.speed * dt) / len, r = 0.3;
+    const ok = (x, y) => free(x - r, y - r) && free(x + r, y - r) && free(x - r, y + r) && free(x + r, y + r);
+    if (ok(me.x + mx * s, me.y)) me.x += mx * s;
+    if (ok(me.x, me.y + my * s)) me.y += my * s;
+    me.d = Math.abs(mx) > Math.abs(my) ? (mx < 0 ? 1 : 2) : my < 0 ? 3 : 0; me.w = 1;
+  } else if (me.path.length) { step(me, CONFIG.speed, dt); me.w = 1; } else me.w = 0;
+  if (me.w) me.phase += dt * 12;
+  if (me.talkTo && !me.path.length) { if (dist(me, me.talkTo) < 1.8) openTalk(me.talkTo); me.talkTo = null; }
+  // Coins: ask the host for any you stand on; add the ones it says you got.
+  const c = coins();
+  for (const [k, x, y] of c.list) if (!(now < me.pending.get(k)) && Math.hypot(x - me.x, y - me.y) < 0.6) { me.pending.set(k, now + 3000); if (isHost()) applyGrab(net.sessionId, k); else net.send("grab", { k }); }
+  for (const [k, id] of c.got) if (id === net.sessionId && !me.credited.has(k)) { me.credited.add(k); if (!ATTRACT) earn(coinValue(), "🪙"); }
+  questTick();
+  const r2 = (v) => Math.round(v * 100) / 100, p = JSON.stringify({ x: r2(me.x), y: r2(me.y), d: me.d, w: me.w });
+  if ((p !== me.sent && now - me.lastSend > 100) || now - me.lastSend > 2000) { me.lastSend = now; me.sent = p; net.me.set("p", p); }
+}
+const coinValue = () => Math.max(1, Number(net.live && net.live.config && net.live.config.coinValue) || CONFIG.coinValue);
+function earn(n, icon) { save.coins += n; save.earned += n; toast(`${icon} +${n}`); dirty = true; submitScore(); }
+/** Quest progress: apples picked, the hat found, letters delivered. */
+function questTick() {
+  if (ATTRACT) return;
+  const q = save.quests;
+  if (q.apples?.s === 1 && q.apples.got.length < CONFIG.quests.apples.need) APPLE_TREES.forEach((t, i) => { if (!q.apples.got.includes(i) && dist(me, t) < 1.5) { q.apples.got.push(i); toast(`🍎 ${q.apples.got.length} / ${CONFIG.quests.apples.need}`); dirty = true; } });
+  if (q.hat?.s === 1 && !q.hat.got.length && dist(me, CONFIG.hatSpot) < 1) { q.hat.got.push(0); toast("🎩 Found Finn's hat!"); dirty = true; }
+  if (q.letters?.s === 1) MAILBOXES.forEach((m, i) => { if (!q.letters.got.includes(i) && dist(me, m) < 1.5) { q.letters.got.push(i); toast(`✉️ ${q.letters.got.length} / ${CONFIG.quests.letters.need}`); dirty = true; } });
+}
+function openTalk(npc) {
+  const q = npc.quest && CONFIG.quests[npc.quest], st = npc.quest && save.quests[npc.quest];
+  let text = npc.idle, btns = [["Bye", null]];
+  if (npc.shop) { text = "Welcome! Coins buy hats and shirts here."; btns = [["Not now", null], ["Browse", () => openShop(), true]]; }
+  else if (q && !st) { text = q.ask; btns = [["Not now", null], ["Sure!", () => { save.quests[npc.quest] = { s: 1, got: [] }; dirty = true; toast(q.title + " started"); }, true]]; }
+  else if (q && st.s === 1 && st.got.length >= q.need) { text = q.done; btns = [["Thanks!", () => { st.s = 2; earn(q.reward, "🎉"); }, true]]; }
+  else if (q && st.s === 1) text = `${q.title}: ${st.got.length} / ${q.need}. ${q.ask}`;
+  $("talkName").textContent = npc.name; $("talkText").textContent = text;
+  $("talkBtns").innerHTML = "";
+  for (const [label, fn, yes] of btns) { const b = document.createElement("button"); b.textContent = label; if (yes) b.className = "yes"; b.onclick = () => { $("talk").hidden = true; if (fn) fn(); }; $("talkBtns").appendChild(b); }
+  $("talk").hidden = false;
+}
+const npcMark = (npc) => { const st = npc.quest && save.quests[npc.quest], q = npc.quest && CONFIG.quests[npc.quest]; return ATTRACT ? (npc.quest ? "!" : "") : !q ? "" : !st ? "!" : st.s === 1 && st.got.length >= q.need ? "?" : ""; };
+
+// ── SAVES & LOGIN ───────────────────────────────────────────────────────────────────
+const FRIENDLY = ["Sunny", "Lucky", "Cosy", "Merry", "Brave", "Jolly"], CRITTERS = ["Fox", "Wren", "Otter", "Mole", "Robin", "Hare"];
+let save = { v: 1, at: 0, name: "", x: 0, y: 0, coins: 0, earned: 0, look: null, owned: [], quests: {} }, dirty = false, player = null, board = null;
+const local = { get: () => { try { return parse(localStorage.getItem("tiny-mmo-town.save"), null); } catch { return null; } }, set: (v) => { try { localStorage.setItem("tiny-mmo-town.save", JSON.stringify(v)); } catch {} } };
+function applySave(s) {
+  save = { ...save, ...s, quests: s.quests || {}, owned: s.owned || [] };
+  if (save.x && free(save.x, save.y)) { me.x = save.x; me.y = save.y; me.path = []; }
+  if (save.look) myLook = { ...myLook, ...save.look };
+  myLook.n = save.name || myLook.n;
+  if (net) net.me.set("look", JSON.stringify(myLook));
+}
+async function saveNow() {
+  if (ATTRACT) return;
+  Object.assign(save, { at: Date.now(), x: Math.round(me.x * 10) / 10, y: Math.round(me.y * 10) / 10, name: myLook.n, look: { s: myLook.s, h: myLook.h } });
+  local.set(save); dirty = false;
+  if (!player) return;
+  try { await player.data.set(save, { namespace: CONFIG.saveNs }); }
+  catch (e) { if (e && e.current) player.data.set(save, { namespace: CONFIG.saveNs, version: e.current.version }).catch(() => {}); } // another device saved in between: ours is newer
+}
+async function loadAccountSave() {
+  try { const r = await player.data.get(CONFIG.saveNs); return r && r.data && r.data.v ? r.data : null; } catch { return null; }
+}
+let lastSubmit = 0;
+function submitScore() { if (board && save.earned && performance.now() - lastSubmit > 15000) { lastSubmit = performance.now(); board.submit(save.earned).catch(() => {}); } }
+function drawAccount() {
+  const p = player && player.player, claimed = p && p.claimed;
+  $("acct").textContent = !player ? "Offline: your character is saved on this device." : claimed ? `Signed in as ${p.username}. Your character is saved to your account.` : "Saved automatically on this device.";
+  $("claimBox").hidden = !player || !!claimed; $("loginBox").hidden = !player || !!claimed;
+}
+async function claim() {
+  const u = $("cUser").value.trim(), pw = $("cPass").value, msg = $("acctMsg");
+  msg.className = ""; msg.textContent = "Saving…";
+  try { await player.claim(u, pw); await saveNow(); msg.textContent = `Saved! Log in as ${u} on any device.`; drawAccount(); }
+  catch (e) { msg.className = "err"; msg.textContent = "Couldn't save your character: " + ((e && e.message) || "try again."); }
+}
+async function login() {
+  const u = $("lUser").value.trim(), pw = $("lPass").value, msg = $("acctMsg");
+  msg.className = ""; msg.textContent = "Logging in…";
+  try {
+    await player.login(u, pw);
+    const s = await loadAccountSave();
+    if (s) applySave(s); else await saveNow();
+    msg.textContent = `Welcome back, ${u}!`; drawAccount(); $("nameIn").value = myLook.n; toast(`👋 Welcome back, ${myLook.n}`);
+  } catch (e) { msg.className = "err"; msg.textContent = "Couldn't log in: " + ((e && e.message) || "try again."); }
+}
+
+// ── HUD & PANELS ────────────────────────────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const typing = () => ["say", "nameIn", "cUser", "cPass", "lUser", "lPass"].includes(document.activeElement && document.activeElement.id);
+let toastTimer = 0;
+function toast(text) { if (ATTRACT) return; $("toast").textContent = text; $("toast").style.opacity = 1; clearTimeout(toastTimer); toastTimer = setTimeout(() => ($("toast").style.opacity = 0), 1600); }
+const lines = [], said = new Map(), heard = new Map(); // said: id -> { text, until }; heard: id -> last chat k
+function bubble(id, name, color, text, log = true) {
+  said.set(id, { text, until: performance.now() + CONFIG.bubbleMs });
+  if (!log) return;
+  lines.push({ name, color, text }); if (lines.length > 30) lines.shift();
+  if (!ATTRACT) $("log").innerHTML = lines.slice(-5).map((l, i, a) => `<div style="opacity:${0.5 + (0.5 * (i + 1)) / a.length}"><b style="color:${esc(l.color)}">${esc(l.name)}</b> ${esc(l.text)}</div>`).join("");
+}
+function sendChat() {
+  const input = $("say"), text = input.value.trim().slice(0, 80), now = performance.now();
+  input.value = ""; input.blur();
+  if (!text || now - me.lastSay < 900) return;
+  me.lastSay = now; me.sayK++;
+  net.send("chat", { t: text, k: me.sayK }); net.me.set("say", JSON.stringify({ t: text, k: me.sayK }));
+  heard.set(net.sessionId, me.sayK); bubble(net.sessionId, myLook.n, myLook.s, text);
+}
+function hud(now) {
+  if (ATTRACT) { for (const id of ["coins", "quests", "net", "hint", "event"]) $(id).textContent = ""; return; }
+  $("coins").textContent = `🪙 ${save.coins}`;
+  $("quests").textContent = Object.entries(save.quests).filter(([, s]) => s.s === 1).map(([k, s]) => `${CONFIG.quests[k].title} ${s.got.length}/${CONFIG.quests[k].need}`).join(" · ");
+  const n = livePlayers().length;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the town" : ""}`;
+  const ev = net.live && net.live.active && net.live.active[0];
+  $("event").textContent = ev ? `★ ${ev.title}` : "";
+  const near = CONFIG.npcs.find((npc) => dist(npc, me) < 1.8);
+  $("hint").textContent = !$("talk").hidden ? "" : near ? (touch ? `Tap ${near.name} to talk` : `Press E to talk to ${near.name}`) : now - startedAt < 12000 ? (touch ? "Tap to walk · tap someone with ! for a quest" : "Click or WASD to walk · talk to people with ! · Enter to chat") : "";
+}
+function openShop() {
+  $("shopCoins").textContent = `You have 🪙 ${save.coins}.`;
+  const item = (kind, id, icon, label, price) => { const own = save.owned.includes(kind + ":" + id) || price === 0, on = kind === "h" ? myLook.h === id : myLook.s === id;
+    return `<button data-k="${kind}" data-id="${esc(id)}" data-p="${price}" class="${on ? "on" : ""}"><i ${kind === "s" ? `style="background:${esc(id)};border-radius:8px"` : ""}>${icon}</i>${label}<br>${on ? "Wearing" : own ? "Wear" : "🪙 " + price}</button>`; };
+  $("shopHats").innerHTML = item("h", "", "🚫", "No hat", 0) + Object.entries(CONFIG.hats).map(([h, p]) => item("h", h, HAT_ICON[h] || "🎩", h, p)).join("");
+  $("shopShirts").innerHTML = COLORS.map((c) => item("s", c, "", "Shirt", CONFIG.shirtPrice)).join("");
+  for (const b of document.querySelectorAll("#shop .grid button")) b.onclick = () => {
+    const k = b.dataset.k, id = b.dataset.id, price = +b.dataset.p, key = k + ":" + id;
+    if (price && !save.owned.includes(key) && !(k === "s" && id === myLook.s)) { if (save.coins < price) { toast("Not enough coins yet"); return; } save.coins -= price; save.owned.push(key); }
+    myLook[k] = id; net.me.set("look", JSON.stringify(myLook)); dirty = true; openShop();
+  };
+  $("shop").hidden = false;
+}
+function openMe() {
+  $("nameIn").value = myLook.n; drawAccount(); $("acctMsg").textContent = "";
+  $("questList").innerHTML = Object.entries(CONFIG.quests).map(([k, q]) => { const s = save.quests[k]; return `<p>${q.title}: ${!s ? "ask around town" : s.s === 2 ? "done ✓" : `${s.got.length} / ${q.need}`}</p>`; }).join("");
+  $("mePanel").hidden = false;
+}
+function openTop() {
+  $("topPanel").hidden = false; $("myEarned").textContent = `You have earned 🪙 ${save.earned} so far.`;
+  const list = $("board");
+  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li>Loading…</li>";
+  (save.earned ? board.submit(save.earned).catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>🪙 ${e.score}</span></li>`).join("") : "<li>No one yet. Earn some coins!</li>";
+  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+}
+for (const b of document.querySelectorAll("[data-close]")) b.onclick = () => { $(b.dataset.close).hidden = true; };
+$("meBtn").onclick = openMe; $("topBtn").onclick = openTop; $("claimGo").onclick = claim; $("loginGo").onclick = login;
+$("nameIn").addEventListener("change", () => { myLook.n = $("nameIn").value.trim().slice(0, 16) || myLook.n; try { localStorage.setItem("mpa-name", myLook.n); } catch {} net.me.set("look", JSON.stringify(myLook)); dirty = true; });
+
+// ── INPUT ───────────────────────────────────────────────────────────────────────────
+const touch = matchMedia("(pointer: coarse)").matches;
+const cam = { x: SPAWN.x * T, y: SPAWN.y * T, z: 1 };
+let tapMark = null;
+cv.addEventListener("pointerdown", (e) => {
+  e.preventDefault(); $("say").blur(); $("talk").hidden = true;
+  const wx = ((e.clientX - W / 2) / cam.z + cam.x) / T, ty = ((e.clientY - H / 2) / cam.z + cam.y) / T, wy = ty - 0.3; // feet go where you tap
+  const npc = CONFIG.npcs.find((n) => Math.hypot(n.x - wx, n.y - 0.4 - ty) < 0.9);
+  if (npc) { if (dist(npc, me) < 1.8) { me.path = []; openTalk(npc); } else { me.path = route(me, nearestFreeAround(npc)); me.talkTo = npc; } return; }
+  const goal = solid(Math.floor(wx), Math.floor(wy)) ? nearestFree(wx, wy) : { x: wx, y: wy };
+  me.path = route(me, goal); me.talkTo = null; tapMark = { x: goal.x, y: goal.y, at: performance.now() };
+});
+const nearestFreeAround = (n) => [[0, 1], [-1, 0], [1, 0], [0, -1]].map(([dx, dy]) => ({ x: n.x + dx, y: n.y + dy })).filter((p) => free(p.x, p.y)).sort((a, b) => dist(a, me) - dist(b, me))[0] || nearestFree(n.x, n.y + 1);
+$("say").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendChat(); } if (e.key === "Escape") $("say").blur(); e.stopPropagation(); });
+addEventListener("keydown", (e) => {
+  if (typing()) return;
+  const k = e.key.toLowerCase();
+  if (k === "enter") { e.preventDefault(); $("say").focus(); return; }
+  if (k === "e" || k === " ") { const npc = CONFIG.npcs.find((n) => dist(n, me) < 1.8); if (npc) { e.preventDefault(); openTalk(npc); } }
+  keys.add(k);
+});
+addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
+addEventListener("blur", () => keys.clear());
+document.addEventListener("touchmove", (e) => { if (e.target === cv) e.preventDefault(); }, { passive: false });
+
+// ── MAIN LOOP ───────────────────────────────────────────────────────────────────────
+const town = paintTown(), views = new Map(); // id -> { x, y, d, w, phase } eased walkers
+let last = performance.now(), lastHb = 0, lastHud = 0, startedAt = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); }
+  if (isHost()) hostTick(dt, now); else host.was = false;
+  myTick(dt, now);
+  draw(now, dt);
+  if (now - lastHud > 250) { lastHud = now; hud(now); fixColor(); }
+  requestAnimationFrame(frame);
+}
+/** Everyone walking about: { id, name, look, x, y, d, w, bot }. Other players are eased toward their last position. */
+function everyone(dt = 0) {
+  const out = [], live = new Set(livePlayers());
+  for (const [id, p] of Object.entries(S.entities.players || {})) {
+    if (id === net.sessionId || !live.has(id)) continue;
+    const q = field("p:" + id, p.p, null), look = field("look:" + id, p.look, {});
+    if (!q) continue;
+    let v = views.get(id); if (!v) { v = { x: q.x, y: q.y, phase: 0 }; views.set(id, v); }
+    if (dt) { const k = 1 - Math.pow(0.001, dt); v.x += (q.x - v.x) * k; v.y += (q.y - v.y) * k; if (q.w) v.phase += dt * 12; }
+    const say = field("say:" + id, p.say, null);
+    if (dt && say && say.k > (heard.get(id) || 0)) { heard.set(id, say.k); bubble(id, String(look.n ?? "Player"), look.s, String(say.t)); }
+    out.push({ id, name: String(look.n ?? "Player"), look, x: v.x, y: v.y, d: q.d, w: q.w, phase: v.phase });
+  }
+  for (const b of botList()) {
+    let v = views.get(b.i); if (!v) { v = { x: b.x, y: b.y, phase: 0 }; views.set(b.i, v); }
+    if (dt) { const k = isHost() ? 1 : 1 - Math.pow(0.001, dt); v.x += (b.x - v.x) * k; v.y += (b.y - v.y) * k; if (b.w) v.phase += dt * 12; }
+    if (dt && b.sk > (heard.get(b.i) || 0)) { const first = !heard.has(b.i); heard.set(b.i, b.sk); if (!isHost() && b.st) bubble(b.i, b.n, b.s, b.st, !first); } // the host showed it already; old villager chatter skips the log
+    out.push({ id: b.i, name: b.n, look: { s: b.s, h: b.h }, x: v.x, y: v.y, d: b.d, w: b.w, phase: v.phase, bot: true });
+  }
+  return out;
+}
+function draw(now, dt) {
+  const z = ATTRACT ? Math.min(W / (20 * T), H / (11.5 * T)) : Math.max(0.9, Math.min(2.2, Math.min(W / (18 * T), H / (11 * T))));
+  cam.z = z; const halfW = W / 2 / z, halfH = H / 2 / z;
+  const fx = ATTRACT ? SQUARE.x : me.x, fy = ATTRACT ? SQUARE.y : me.y;
+  const tx = Math.max(halfW, Math.min(MW * T - halfW, fx * T)), ty = Math.max(halfH, Math.min(MH * T - halfH, fy * T - 16));
+  cam.x += (tx - cam.x) * Math.min(1, dt * 6); cam.y += (ty - cam.y) * Math.min(1, dt * 6);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.fillStyle = "#2e7d32"; ctx.fillRect(0, 0, W, H);
+  ctx.setTransform(DPR * z, 0, 0, DPR * z, DPR * (W / 2 - cam.x * z), DPR * (H / 2 - cam.y * z));
+  ctx.drawImage(town, 0, 0);
+  const t = now / 1000;
+  // water sparkles, the tap target
+  for (let i = 0; i < 14; i++) { const x = (26 + ((i * 7.3) % 11)) * T, y = (21 + ((i * 3.1) % 4)) * T + 10, a = (Math.sin(t * 2 + i) + 1) / 2; ctx.fillStyle = `rgba(255,255,255,${a * 0.7})`; ctx.fillRect(x, y, 10, 2); }
+  if (tapMark && now - tapMark.at < 600) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(tapMark.x * T, tapMark.y * T, 4 + (now - tapMark.at) / 40, 0, Math.PI * 2); ctx.stroke(); }
+  // your quest things: apples on the trees, Finn's hat, the mailboxes you still need
+  const q = save.quests;
+  if (q.apples?.s === 1) APPLE_TREES.forEach((tr, i) => { if (!q.apples.got.includes(i)) for (const [ox, oy] of [[-6, -14], [5, -10]]) dot(tr.x * T + ox, tr.y * T + oy, 3.5, "#e53935"); });
+  if (q.hat?.s === 1 && !q.hat.got.length) { drawHat("straw", CONFIG.hatSpot.x * T, CONFIG.hatSpot.y * T, 0); dot(CONFIG.hatSpot.x * T + 8, CONFIG.hatSpot.y * T - 6, 2 + Math.sin(t * 6) * 1.5, "#fff"); }
+  if (q.letters?.s === 1) MAILBOXES.forEach((m, i) => { if (!q.letters.got.includes(i)) { ctx.fillStyle = "#ffd23f"; ctx.font = "900 16px system-ui"; ctx.textAlign = "center"; ctx.fillText("✉", m.x * T, m.y * T - 22 + Math.sin(t * 4) * 2); } });
+  for (const [k, x, y] of coins().list) {
+    if (now < me.pending.get(k)) continue; // asked the host for it: hide it while we wait
+    const sx = Math.abs(Math.cos(t * 3 + x)) * 7 + 1;
+    ctx.fillStyle = "#b8860b"; ctx.beginPath(); ctx.ellipse(x * T, y * T + 1, sx, 7, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#ffd23f"; ctx.beginPath(); ctx.ellipse(x * T, y * T, sx * 0.8, 6, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  // everyone, sorted top to bottom so nearer people overlap farther ones
+  const people = [...CONFIG.npcs.map((n) => ({ ...n, npc: true, d: 0, w: 0, phase: 0 })), ...everyone(dt), { id: net.sessionId, name: myLook.n, look: myLook, x: me.x, y: me.y, d: me.d, w: me.w, phase: me.phase, mine: true }];
+  people.sort((a, b) => a.y - b.y);
+  for (const p of people) drawPerson(p.x * T, p.y * T + 10, p.look, p.d, p.phase, p.w);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  for (const p of people) {
+    const sx = (p.x * T - cam.x) * z + W / 2, sy = (p.y * T + 10 - 46 - cam.y) * z + H / 2, b = said.get(p.id);
+    if (sx < -100 || sx > W + 100 || sy < -60 || sy > H + 120) continue;
+    drawLabel(sx, sy, ATTRACT ? "" : p.name, p.mine ? "#ffd23f" : p.npc ? "#ffe9b0" : "#fff", b && b.until > now ? b.text : "", p.npc ? npcMark(p) : "");
+  }
+}
+/** Right after joining, a brand-new character takes a shirt color nobody else has: whoever joined later (look.j) gives way. */
+let joinedAt = 0, freshLook = false;
+function fixColor() {
+  if (!freshLook || performance.now() - joinedAt > 6000) return;
+  const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([id, p]) => ({ id, ...field("look:" + id, p.look, {}) }));
+  if (!others.some((o) => o.s === myLook.s && (o.j < myLook.j || (o.j === myLook.j && o.id < net.sessionId)))) return;
+  const c = COLORS.find((col) => !others.some((o) => o.s === col)); if (c) { myLook.s = c; save.owned.push("s:" + c); net.me.set("look", JSON.stringify(myLook)); dirty = true; }
+}
+
+(async function start() {
+  net = await connect();
+  net.onState((st) => { S = st; });
+  net.on("grab", (msg, from) => { if (isHost() && msg && typeof msg.k === "string") applyGrab(from, msg.k); });
+  net.on("chat", (msg, from) => {
+    if (!msg || typeof msg.t !== "string") return;
+    const look = field("look:" + from, S.entities.players[from]?.look, {});
+    if ((msg.k || 0) > (heard.get(from) || 0)) { heard.set(from, msg.k || 0); bubble(from, String(look.n ?? "Player"), look.s, msg.t.slice(0, 80)); }
+  });
+  net.onDisconnect(() => { $("net").textContent = "Reconnecting…"; });
+  // Your character: this device's save first, then your account's if it is newer.
+  let name = ""; try { name = localStorage.getItem("mpa-name") || ""; } catch {}
+  myLook.n = name || pick(FRIENDLY) + " " + pick(CRITTERS);
+  const saved = ATTRACT ? null : local.get();
+  freshLook = !(saved && saved.look);
+  if (freshLook) { const taken = new Set(Object.keys(S.entities.players || {}).filter((id) => id !== net.sessionId).map((id) => field("look:" + id, S.entities.players[id].look, {}).s)); myLook.s = COLORS.find((c) => !taken.has(c)) || pick(COLORS); }
+  if (saved) applySave(saved); else save.owned.push("s:" + myLook.s); // your first shirt is yours to keep
+  if (ATTRACT) { me.x = 17.5; me.y = 16.5; myLook.h = "cap"; }
+  myLook.j = Date.now(); // when you joined: settles who changes shirt if two new players match
+  net.me.set({ look: JSON.stringify(myLook), hb: Date.now() }); joinedAt = performance.now();
+  if (!net.offline && typeof MP !== "undefined") {
+    player = MP.auth({ key: MP_CONNECT.key, apiUrl: MP_CONNECT.apiUrl }); board = player.leaderboard(CONFIG.board);
+    player.getPlayer().then(loadAccountSave).then((s) => { if (s && s.at > (save.at || 0)) { applySave(s); toast(`👋 Welcome back, ${myLook.n}`); } }).catch(() => {});
+  }
+  setInterval(() => { if (dirty) saveNow(); }, CONFIG.saveEveryMs);
+  addEventListener("pagehide", () => { saveNow(); });
+  if (ATTRACT) { $("bar").hidden = true; $("left").hidden = true; }
+  startedAt = performance.now();
+  cam.x = (ATTRACT ? SQUARE.x : me.x) * T; cam.y = (ATTRACT ? SQUARE.y : me.y) * T;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
