@@ -380,9 +380,14 @@ function adopt() {
   for (const b of field("shared:bots", S.shared.bots, [])) host.bots.set(b.i, newBot(b.i, { name: b.n, look: { s: b.s, h: b.h }, x: b.x, y: b.y, d: b.d, say: { t: b.st || "", k: b.sk || 0 } }));
   for (const id of livePlayers()) if (id !== net.sessionId || S.shared.bots) host.greeted.add(id); // a fresh room greets you
 }
+/** A shirt color no player or villager is wearing (undefined when all are taken), so everyone is easy to tell apart. */
+function freeShirt() {
+  const worn = new Set([myLook.s, ...livePlayers().map((id) => field("look:" + id, S.entities.players[id]?.look, {}).s), ...[...host.bots.values()].map((b) => b.look.s)]);
+  return pick(COLORS.filter((c) => !worn.has(c)));
+}
 function newBot(id, from) {
   const used = new Set([...host.bots.values()].map((b) => b.name)), spot = pick(POIS);
-  return { id, name: BOT_NAMES.find((n) => !used.has(n)) || "Villager", look: { s: pick(COLORS), h: pick(["", "cap", "bow", "flower", "tophat", "wizard"]) },
+  return { id, name: BOT_NAMES.find((n) => !used.has(n)) || "Villager", look: { s: freeShirt() || pick(COLORS), h: pick(["", "cap", "bow", "flower", "tophat", "wizard"]) },
     x: spot.x, y: spot.y, d: 0, w: 0, path: [], until: 0, coin: "", phase: 0, nextSay: performance.now() + rnd(2000, CONFIG.botTalk[1]), say: { t: "", k: 0 }, ...from };
 }
 function botLine(b, text) { b.say = { t: text, k: b.say.k + 1 }; bubble(b.id, b.name, b.look.s, text); }
@@ -397,6 +402,8 @@ function hostTick(dt, now) {
   const humans = livePlayers().filter((id) => !(ATTRACT && id === net.sessionId)), want = Math.max(0, CONFIG.seats - humans.length - (ATTRACT ? 1 : 0));
   while (host.bots.size > want) host.bots.delete([...host.bots.keys()].pop());
   while (host.bots.size < want) { const id = "b" + Math.random().toString(36).slice(2, 6); host.bots.set(id, newBot(id)); }
+  const shirts = new Set(livePlayers().map((id) => (id === net.sessionId ? myLook : field("look:" + id, S.entities.players[id]?.look, {})).s));
+  for (const b of host.bots.values()) if (shirts.has(b.look.s)) b.look.s = freeShirt() || b.look.s; // a player wears it (a saved shirt, say): the villager changes
   if (host.coins.list.length < CONFIG.coinsOnMap && now > host.coinAt) { // a new shiny coin somewhere in town
     host.coinAt = now + CONFIG.coinEvery;
     for (let tries = 0; tries < (ATTRACT ? 200 : 30); tries++) { const x = 1 + Math.floor(Math.random() * (MW - 2)), y = 1 + Math.floor(Math.random() * (MH - 2)); if (ATTRACT && dist({ x, y }, SQUARE) > 8) continue; if (!solid(x, y) && route(SPAWN, { x: x + 0.5, y: y + 0.5 }).length) { host.coins.list.push([Date.now().toString(36) + Math.random().toString(36).slice(2, 5), x + 0.5, y + 0.5]); host.coinsDirty = true; break; } }
@@ -554,12 +561,13 @@ function sendChat() {
   net.send("chat", { t: text, k: me.sayK }); net.me.set("say", JSON.stringify({ t: text, k: me.sayK }));
   heard.set(net.sessionId, me.sayK); bubble(net.sessionId, myLook.n, myLook.s, text);
 }
+let dropped = false; // true while the connection is down: the HUD keeps showing "Reconnecting…"
 function hud(now) {
   if (ATTRACT) { for (const id of ["coins", "quests", "net", "hint", "event"]) $(id).textContent = ""; return; }
   $("coins").textContent = `🪙 ${save.coins}`;
   $("quests").textContent = Object.entries(save.quests).filter(([, s]) => s.s === 1).map(([k, s]) => `${CONFIG.quests[k].title} ${s.got.length}/${CONFIG.quests[k].need}`).join(" · ");
   const n = livePlayers().length;
-  $("net").textContent = net.offline ? "Offline: playing with bots" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the town" : ""}`;
+  $("net").textContent = net.offline ? "Offline: playing with bots" : dropped ? "Reconnecting…" : `Online · ${n} player${n === 1 ? "" : "s"}${isHost() ? " · you run the town" : ""}`;
   const ev = net.live && net.live.active && net.live.active[0];
   $("event").textContent = ev ? `★ ${ev.title}` : "";
   const near = CONFIG.npcs.find((npc) => dist(npc, me) < 1.8);
@@ -625,7 +633,7 @@ document.addEventListener("touchmove", (e) => { if (e.target === cv) e.preventDe
 const town = paintTown(), views = new Map(); // id -> { x, y, d, w, phase } eased walkers
 let last = performance.now(), lastHb = 0, lastHud = 0, startedAt = 0;
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; // never negative: the first frame can be stamped before `last`
   if (now - lastHb > 1000) { lastHb = now; net.me.set("hb", Date.now()); }
   if (isHost()) hostTick(dt, now); else host.was = false;
   myTick(dt, now);
@@ -689,13 +697,14 @@ function draw(now, dt) {
     drawLabel(sx, sy, ATTRACT ? "" : p.name, p.mine ? "#ffd23f" : p.npc ? "#ffe9b0" : "#fff", b && b.until > now ? b.text : "", p.npc ? npcMark(p) : "");
   }
 }
-/** Right after joining, a brand-new character takes a shirt color nobody else has: whoever joined later (look.j) gives way. */
+/** Right after joining, a brand-new character takes a shirt color nobody else (player or villager) has: whoever joined later (look.j) gives way. */
 let joinedAt = 0, freshLook = false;
 function fixColor() {
   if (!freshLook || performance.now() - joinedAt > 6000) return;
   const others = Object.entries(S.entities.players || {}).filter(([id]) => id !== net.sessionId).map(([id, p]) => ({ id, ...field("look:" + id, p.look, {}) }));
-  if (!others.some((o) => o.s === myLook.s && (o.j < myLook.j || (o.j === myLook.j && o.id < net.sessionId)))) return;
-  const c = COLORS.find((col) => !others.some((o) => o.s === col)); if (c) { myLook.s = c; save.owned.push("s:" + c); net.me.set("look", JSON.stringify(myLook)); dirty = true; }
+  const bots = botList();
+  if (!others.some((o) => o.s === myLook.s && (o.j < myLook.j || (o.j === myLook.j && o.id < net.sessionId))) && !bots.some((b) => b.s === myLook.s)) return;
+  const c = COLORS.find((col) => !others.some((o) => o.s === col) && !bots.some((b) => b.s === col)); if (c) { myLook.s = c; save.owned.push("s:" + c); net.me.set("look", JSON.stringify(myLook)); dirty = true; }
 }
 
 (async function start() {
@@ -707,13 +716,14 @@ function fixColor() {
     const look = field("look:" + from, S.entities.players[from]?.look, {});
     if ((msg.k || 0) > (heard.get(from) || 0)) { heard.set(from, msg.k || 0); bubble(from, String(look.n ?? "Player"), look.s, msg.t.slice(0, 80)); }
   });
-  net.onDisconnect(() => { $("net").textContent = "Reconnecting…"; });
+  net.onDisconnect(() => { dropped = true; $("net").textContent = "Reconnecting…"; });
+  net.onReconnect(() => { dropped = false; });
   // Your character: this device's save first, then your account's if it is newer.
   let name = ""; try { name = localStorage.getItem("mpa-name") || ""; } catch {}
   myLook.n = name || pick(FRIENDLY) + " " + pick(CRITTERS);
   const saved = ATTRACT ? null : local.get();
   freshLook = !(saved && saved.look);
-  if (freshLook) { const taken = new Set(Object.keys(S.entities.players || {}).filter((id) => id !== net.sessionId).map((id) => field("look:" + id, S.entities.players[id].look, {}).s)); myLook.s = COLORS.find((c) => !taken.has(c)) || pick(COLORS); }
+  if (freshLook) { const taken = new Set(Object.keys(S.entities.players || {}).filter((id) => id !== net.sessionId).map((id) => field("look:" + id, S.entities.players[id].look, {}).s)); for (const b of botList()) taken.add(b.s); myLook.s = COLORS.find((c) => !taken.has(c)) || pick(COLORS); }
   if (saved) applySave(saved); else save.owned.push("s:" + myLook.s); // your first shirt is yours to keep
   if (ATTRACT) { me.x = 17.5; me.y = 16.5; myLook.h = "cap"; }
   myLook.j = Date.now(); // when you joined: settles who changes shirt if two new players match
