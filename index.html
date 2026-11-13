@@ -30,12 +30,13 @@
   .card p { margin: 6px 0; font-size: 14px; color: #4a5266; }
   .card input { width: 100%; box-sizing: border-box; height: 44px; margin: 4px 0; border: 2px solid #e6dfcf; border-radius: 12px; padding: 0 12px; font: 600 16px system-ui, sans-serif; background: #fff; }
   .card .go { width: 100%; margin-top: 12px; background: #ff9f43; color: #fff; box-shadow: none; }
-  .card ol { margin: 0; padding-left: 24px; } .card li span { float: right; }
+  .card ol { margin: 0; padding-left: 24px; } .card li span { float: right; } .card li.note { list-style: none; margin-left: -24px; color: #4a5266; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
   .grid button { box-shadow: none; background: #f0ebe0; font-size: 14px; padding: 6px; } .grid button.on { outline: 3px solid #ff9f43; }
   .grid button i { display: block; height: 22px; font-style: normal; font-size: 20px; }
   .err { color: #c0392b !important; font-weight: 700; }
   [hidden] { display: none !important; }
+  @media (max-width: 520px) { #event { top: calc(max(10px, env(safe-area-inset-top)) + 54px); } }
 </style>
 <script src="https://cdn.multiplayeragent.com/sdk/mp.global.js"></script>
 </head>
@@ -73,7 +74,7 @@
   <button class="go" data-close="mePanel">Close</button>
 </div></div>
 <div class="panel" id="topPanel" hidden><div class="card">
-  <h2>Most coins earned</h2><ol id="board"><li>Loading…</li></ol><p id="myEarned"></p>
+  <h2>Most coins earned</h2><ol id="board"><li class="note">Loading…</li></ol><p id="myEarned"></p>
   <button class="go" data-close="topPanel">Close</button>
 </div></div>
 <script>
@@ -428,7 +429,7 @@ function hostTick(dt, now) {
         b.coin = coin ? coin[0] : ""; b.path = route(b, goal); b.until = now + rnd(1500, 5000);
       }
     }
-    if (now > b.nextSay) { b.nextSay = now + rnd(...CONFIG.botTalk); botLine(b, pick(CONFIG.botLines)); }
+    if (now > b.nextSay) { b.nextSay = now + rnd(...CONFIG.botTalk); const fresh = CONFIG.botLines.filter((l) => !bots.some((o) => o.say.t === l)); botLine(b, pick(fresh.length ? fresh : CONFIG.botLines)); } // a line no villager is saying right now
   }
   if (now - host.lastPub > 160) { // ~6/s, one message for every villager; coins only when they change
     host.lastPub = now; const r2 = (v) => Math.round(v * 100) / 100;
@@ -596,11 +597,11 @@ function openMe() {
 function openTop() {
   $("topPanel").hidden = false; $("myEarned").textContent = `You have earned 🪙 ${save.earned} so far.`;
   const list = $("board");
-  if (!board) { list.innerHTML = "<li>Leaderboards need a connection.</li>"; return; }
-  list.innerHTML = "<li>Loading…</li>";
+  if (!board) { list.innerHTML = "<li class='note'>Leaderboards need a connection.</li>"; return; }
+  list.innerHTML = "<li class='note'>Loading…</li>";
   (save.earned ? board.submit(save.earned).catch(() => null) : Promise.resolve()).then(() => board.top(10)).then(({ entries }) => {
-    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>🪙 ${e.score}</span></li>`).join("") : "<li>No one yet. Earn some coins!</li>";
-  }).catch(() => { list.innerHTML = "<li>Couldn't load the leaderboard.</li>"; });
+    list.innerHTML = entries.length ? entries.map((e) => `<li>${esc(e.username || "Player")}<span>🪙 ${e.score}</span></li>`).join("") : "<li class='note'>No one yet. Earn some coins!</li>";
+  }).catch(() => { list.innerHTML = "<li class='note'>Couldn't load the leaderboard.</li>"; });
 }
 for (const b of document.querySelectorAll("[data-close]")) b.onclick = () => { $(b.dataset.close).hidden = true; };
 $("meBtn").onclick = openMe; $("topBtn").onclick = openTop; $("claimGo").onclick = claim; $("loginGo").onclick = login;
@@ -610,7 +611,9 @@ $("nameIn").addEventListener("change", () => { myLook.n = $("nameIn").value.trim
 const touch = matchMedia("(pointer: coarse)").matches;
 const cam = { x: SPAWN.x * T, y: SPAWN.y * T, z: 1 };
 let tapMark = null;
+cv.addEventListener("contextmenu", (e) => e.preventDefault());
 cv.addEventListener("pointerdown", (e) => {
+  if (e.pointerType === "mouse" && e.button !== 0) return; // left click (or a tap) only
   e.preventDefault(); $("say").blur(); $("talk").hidden = true;
   const wx = ((e.clientX - W / 2) / cam.z + cam.x) / T, ty = ((e.clientY - H / 2) / cam.z + cam.y) / T, wy = ty - 0.3; // feet go where you tap
   const npc = CONFIG.npcs.find((n) => Math.hypot(n.x - wx, n.y - 0.4 - ty) < 0.9);
@@ -646,6 +649,13 @@ function frame(now) {
   draw(now, dt);
   if (now - lastHud > 250) { lastHud = now; hud(now); fixColor(); }
 }
+/** Move a drawn walker toward where it last said it was, at about walking pace, so it glides between the few updates a second; a big gap (a respawn) jumps. */
+function follow(v, x, y, pace, dt) {
+  const dx = x - v.x, dy = y - v.y, d = Math.hypot(dx, dy);
+  if (d > 3) { v.x = x; v.y = y; return; }
+  const s = Math.min(d, Math.max(pace * (d > 0.6 ? 1.4 : 1.1) * dt, d * (1 - Math.pow(0.001, dt)) * 0.5));
+  if (d > 0.001) { v.x += (dx / d) * s; v.y += (dy / d) * s; }
+}
 /** Everyone walking about: { id, name, look, x, y, d, w, bot }. Other players are eased toward their last position. */
 function everyone(dt = 0) {
   const out = [], live = new Set(livePlayers());
@@ -654,14 +664,14 @@ function everyone(dt = 0) {
     const q = field("p:" + id, p.p, null), look = field("look:" + id, p.look, {});
     if (!q) continue;
     let v = views.get(id); if (!v) { v = { x: q.x, y: q.y, phase: 0 }; views.set(id, v); }
-    if (dt) { const k = 1 - Math.pow(0.001, dt); v.x += (q.x - v.x) * k; v.y += (q.y - v.y) * k; if (q.w) v.phase += dt * 12; }
+    if (dt) { follow(v, q.x, q.y, CONFIG.speed, dt); if (q.w) v.phase += dt * 12; }
     const say = field("say:" + id, p.say, null);
     if (dt && say && say.k > (heard.get(id) || 0)) { heard.set(id, say.k); bubble(id, String(look.n ?? "Player"), look.s, String(say.t)); }
     out.push({ id, name: String(look.n ?? "Player"), look, x: v.x, y: v.y, d: q.d, w: q.w, phase: v.phase });
   }
   for (const b of botList()) {
     let v = views.get(b.i); if (!v) { v = { x: b.x, y: b.y, phase: 0 }; views.set(b.i, v); }
-    if (dt) { const k = isHost() ? 1 : 1 - Math.pow(0.001, dt); v.x += (b.x - v.x) * k; v.y += (b.y - v.y) * k; if (b.w) v.phase += dt * 12; }
+    if (dt) { if (isHost()) { v.x = b.x; v.y = b.y; } else follow(v, b.x, b.y, CONFIG.speed * 0.6, dt); if (b.w) v.phase += dt * 12; }
     if (dt && b.sk > (heard.get(b.i) || 0)) { const first = !heard.has(b.i); heard.set(b.i, b.sk); if (!isHost() && b.st) bubble(b.i, b.n, b.s, b.st, !first); } // the host showed it already; old villager chatter skips the log
     out.push({ id: b.i, name: b.n, look: { s: b.s, h: b.h }, x: v.x, y: v.y, d: b.d, w: b.w, phase: v.phase, bot: true });
   }
